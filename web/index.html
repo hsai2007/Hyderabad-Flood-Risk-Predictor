@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Hyderabad Flood Risk</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <style>
+    #map { height: 100vh; }
+  </style>
+</head>
+<body>
+<div id="map"></div>
+
+<script>
+var map = L.map('map').setView([17.38, 78.48], 11);
+
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+fetch("http://127.0.0.1:5000/floods")
+  .then(r => r.json())
+  .then(data => {
+    L.geoJSON(data, {
+      style: {color: "red", weight: 3}
+    }).addTo(map);
+  });
+</script>
+</body>
+</html>
