@@ -1,4 +1,4 @@
-# Hyderabad-Risk-Flood-Predictor
+# Hyderabad-Flood-Risk-Predictor
 EVT-based(Probability Model) urban flood risk prediction system for Hyderabad using rainfall, land use, drainage networks, and GIS.
 
 ## How to Reproduce the Model
