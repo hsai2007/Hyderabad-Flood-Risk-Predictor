@@ -2,7 +2,7 @@ import rasterio
 from rasterio.merge import merge
 import glob
 
-files = glob.glob("data/dem_tiles/*.tif")
+files = glob.glob("data/dem_tiles/*.hgt")
 
 rasters = [rasterio.open(f) for f in files]
 
@@ -12,7 +12,8 @@ meta = rasters[0].meta.copy()
 meta.update({
     "height": mosaic.shape[1],
     "width": mosaic.shape[2],
-    "transform": transform
+    "transform": transform,
+    "driver" : "GTiff"
 })
 
 with rasterio.open("data/dem.tif", "w", **meta) as dest:
