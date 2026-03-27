@@ -1,13 +1,5 @@
 # Hyderabad-Flood-Risk-Predictor
-An EVT-based (Extreme Value Theory / Probability Model) urban flood risk prediction system for Hyderabad. This project takes raw elevation data, land-use maps, and historical rainfall, calculates surface water runoff, and identifies failure points in the city's drainage network to predict flood zones.
-
-## 🚀 Features
-* **3D Elevation Processing:** Converts raw NASA `.hgt` DEM files into usable topographical maps.
-* **Surface Runoff Calculation:** Analyzes OpenStreetMap (OSM) land-use data to determine the absorption rates of concrete vs. green spaces.
-* **Hydrological Routing:** Uses slope and catchment mapping to simulate the downhill flow of rainwater.
-* **Infrastructure Stress Testing:** Cross-references water flow with the city's drainage network to pinpoint overflow risks.
-* **Interactive Mapping:** Serves the final risk zones on an interactive local web interface.
----
+EVT-based(Probability Model) urban flood risk prediction system for Hyderabad using rainfall, land use, drainage networks, and GIS.
 
 ## How to Reproduce the Model
 

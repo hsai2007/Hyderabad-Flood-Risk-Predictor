@@ -1,27 +1,153 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Hyderabad Flood Risk</title>
+  <title>Hyderabad Flood Risk Map</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
   <style>
-    #map { height: 100vh; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; }
+    #map { height: 100vh; width: 100vw; }
+
+    #panel {
+      position: absolute;
+      top: 10px; right: 10px;
+      z-index: 1000;
+      background: white;
+      border-radius: 10px;
+      padding: 16px;
+      width: 220px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.2);
+    }
+    #panel h2 { font-size: 15px; margin-bottom: 12px; color: #222; }
+
+    .legend-item {
+      display: flex; align-items: center;
+      margin-bottom: 7px; font-size: 13px;
+    }
+    .legend-dot {
+      width: 14px; 
+      height: 14px; 
+      border-radius: 50%;
+      margin-right: 8px; 
+      flex-shrink: 0;
+    }
+
+    #stats {
+      margin-top: 14px;
+      border-top: 1px solid #eee;
+      padding-top: 10px;
+      font-size: 12px;
+      color: #555;
+    }
+    #stats p { margin-bottom: 4px; }
+
+    #loading {
+      position: absolute; top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      z-index: 2000;
+      background: white;
+      padding: 20px 30px;
+      border-radius: 10px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.2);
+      font-size: 15px;
+      color: #333;
+    }
   </style>
 </head>
 <body>
+
+<div id="loading">⏳ Loading flood risk data...</div>
 <div id="map"></div>
 
+<div id="panel">
+  <h2>🌊 Hyderabad Flood Risk</h2>
+
+  <div class="legend-item">
+    <div class="legend-dot" style="background:red"></div> Flooded drain
+  </div>
+  <div class="legend-item">
+    <div class="legend-dot" style="background:orange"></div> High clog risk (&gt;50%)
+  </div>
+  <div class="legend-item">
+    <div class="legend-dot" style="background:#e6c800"></div> Medium risk (20–50%)
+  </div>
+  <div class="legend-item">
+    <div class="legend-dot" style="background:green"></div> Low risk (&lt;20%)
+  </div>
+  <div class="legend-item">
+    <div class="legend-dot" style="background:blue"></div> No risk data
+  </div>
+
+  <div id="stats">
+    <p id="stat-total">Total pipes: –</p>
+    <p id="stat-flooded">Flooded: –</p>
+    <p id="stat-high">High risk: –</p>
+  </div>
+</div>
+
 <script>
-var map = L.map('map').setView([17.38, 78.48], 11);
+var map = L.map("map").setView([17.38, 78.48], 12);
 
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  attribution: "© OpenStreetMap contributors"
+}).addTo(map);
 
-fetch("http://127.0.0.1:5000/floods")
+fetch("http://127.0.0.1:5000/all_pipes")
   .then(r => r.json())
   .then(data => {
+    document.getElementById("loading").style.display = "none";
+
+    var total = 0, flooded = 0, high = 0;
+
     L.geoJSON(data, {
-      style: {color: "red", weight: 3}
+      style: function(feature) {
+        var color = feature.properties.risk_color || "blue";
+        var weight = (color === "red") ? 5 : 2.5;
+        return { color: color, weight: weight, opacity: 0.85 };
+      },
+      onEachFeature: function(feature, layer) {
+        var p = feature.properties;
+        total++;
+        if (p.flooding === true) flooded++;
+        if (p.P_clog > 0.5) high++;
+
+        layer.bindPopup(
+          "<b>Drain Pipe</b><br>" +
+          "Flow: " + (p.flow_m3s || 0).toFixed(3) + " m³/s<br>" +
+          "Clog risk: " + ((p.P_clog || 0) * 100).toFixed(1) + "%<br>" +
+          "Flooded: " + (p.flooding ? "<b style='color:red'>YES</b>" : "No")
+        );
+      }
     }).addTo(map);
+
+    document.getElementById("stat-total").textContent   = "Total pipes: " + total;
+    document.getElementById("stat-flooded").textContent = "Flooded: " + flooded;
+    document.getElementById("stat-high").textContent    = "High risk: " + high;
+  })
+  .catch(err => {
+    document.getElementById("loading").textContent = " Error loading data: " + err;
+  });
+
+fetch("http://127.0.0.1:5000/risk_points")
+  .then(r => r.json())
+  .then(points => {
+    if (!Array.isArray(points)) return;
+    points.forEach(function(p) {
+      if (!p.lat || !p.lon) return;
+      L.circleMarker([p.lat, p.lon], {
+        radius: 8,
+        color: p.flooding ? "red" : "orange",
+        fillColor: p.flooding ? "red" : "orange",
+        fillOpacity: 0.8,
+        weight: 2
+      }).bindPopup(
+        "<b>High Risk Point</b><br>" +
+        "Flow: " + (p.flow_m3s || 0).toFixed(3) + " m³/s<br>" +
+        "Clog probability: " + ((p.P_clog || 0) * 100).toFixed(1) + "%<br>" +
+        "Flooded: " + (p.flooding ? "<b style='color:red'>YES</b>" : "No")
+      ).addTo(map);
+    });
   });
 </script>
 </body>
