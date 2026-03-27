@@ -4,14 +4,12 @@ import pandas as pd
 # Load GeoJSON
 gdf = gpd.read_file("data/hyderabad_landuse.geojson")
 
-print("[INFO] Columns found:", gdf.columns)
+print("[INFO] Columns found:", gdf.columns.tolist())
 
 # ---------------------------------
 # Separate roads (LINE features)
 # ---------------------------------
 roads = gdf[gdf["highway"].notna()].copy()
-
-# Remove roads from main landuse set
 gdf = gdf[gdf["highway"].isna()]
 
 # ---------------------------------
@@ -36,15 +34,35 @@ gdf["land_type"] = gdf.apply(classify, axis=1)
 gdf = gdf.dropna(subset=["land_type"])
 
 # ---------------------------------
-# Reproject everything to meters
+# Reproject everything to metres
 # ---------------------------------
-gdf = gdf.to_crs(epsg=3857)
+gdf   = gdf.to_crs(epsg=3857)
 roads = roads.to_crs(epsg=3857)
 
 # ---------------------------------
-# Convert road lines → polygons (width = 15 m)
+# FIX: Road width by highway type (not a flat 15m for everything)
 # ---------------------------------
-roads["geometry"] = roads.geometry.buffer(15)
+# OSM highway tag → typical carriageway half-width (buffer in metres)
+# Sources: IRC:86 (Indian Road Congress geometric design standards)
+ROAD_WIDTHS = {
+    "motorway":      30,   # 6-lane expressway
+    "trunk":         20,   # 4-lane arterial
+    "primary":       15,   # 4-lane primary road
+    "secondary":     10,   # 2-lane secondary road
+    "tertiary":       7,   # 2-lane local road
+    "residential":    5,   # residential street
+    "service":        4,   # service lane / access road
+    "footway":        2,   # pedestrian path
+    "path":           1.5,
+    "cycleway":       2,
+    "unclassified":   6,   # default for unknown
+}
+
+def road_buffer(highway_type):
+    return ROAD_WIDTHS.get(str(highway_type).lower(), 6)  # default 6m
+
+roads["buffer_m"] = roads["highway"].apply(road_buffer)
+roads["geometry"] = roads.apply(lambda r: r.geometry.buffer(r["buffer_m"]), axis=1)
 roads["land_type"] = "road"
 
 # ---------------------------------
@@ -55,20 +73,24 @@ gdf = pd.concat([gdf, roads[["geometry", "land_type"]]])
 # ---------------------------------
 # Compute areas
 # ---------------------------------
-gdf["area_m2"] = gdf.geometry.area
+gdf["area_m2"]  = gdf.geometry.area
 gdf["area_km2"] = gdf["area_m2"] / 1e6
 
 # ---------------------------------
-# Runoff coefficients
+# FIX: Runoff coefficients — water bodies get C=0.1 not 0.0
 # ---------------------------------
+# Water bodies (lakes, tanks) in Hyderabad (Hussain Sagar, Durgam Cheruvu etc.)
+# can overflow when rainfall exceeds their capacity. Using C=0.0 completely
+# ignores this common flood mechanism. C=0.1 is a conservative estimate
+# representing overflow contribution during extreme events.
 C = {
-    "road": 0.9,
-    "commercial": 0.8,
-    "industrial": 0.7,
+    "road":        0.9,
+    "commercial":  0.8,
+    "industrial":  0.7,
     "residential": 0.6,
-    "park": 0.3,
-    "forest": 0.2,
-    "water": 0.0
+    "park":        0.3,
+    "forest":      0.2,
+    "water":       0.1   # FIX: was 0.0 — now accounts for overflow risk
 }
 
 gdf["runoff_C"] = gdf["land_type"].map(C)
