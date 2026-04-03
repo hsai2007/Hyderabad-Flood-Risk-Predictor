@@ -1,29 +1,29 @@
 import requests
 import pandas as pd
+import os
 
-LAT = 17.3850
-LON = 78.4867
+url = "https://power.larc.nasa.gov/api/temporal/daily/point"
 
-url = (
-    "https://archive-api.open-meteo.com/v1/archive?"
-    f"latitude={LAT}&longitude={LON}"
-    "&start_date=2010-01-01"
-    "&end_date=2024-12-31"
-    "&hourly=rain"
-    "&timezone=Asia%2FKolkata"
-)
+params = {
+    "parameters": "PRECTOTCORR",
+    "community": "RE",
+    "longitude": 78.4744,
+    "latitude": 17.3850,
+    "start": "19900101",
+    "end": "20241231",
+    "format": "JSON"
+}
 
-r = requests.get(url).json()
+print("[INFO] Fetching NASA POWER rainfall data (1990–2024)...")
+response = requests.get(url, params=params)
+data = response.json()
 
-df = pd.DataFrame({
-    "time": r["hourly"]["time"],
-    "rain (mm)": r["hourly"]["rain"]
-})
+daily = data["properties"]["parameter"]["PRECTOTCORR"]
+df = pd.DataFrame(list(daily.items()), columns=["date", "rain_mm"])
+df["date"] = pd.to_datetime(df["date"], format="%Y%m%d")
+df = df[df["rain_mm"] >= 0]
 
-df["time"] = pd.to_datetime(df["time"])
-df = df.dropna()
-
+os.makedirs("data/rainfall", exist_ok=True)
 df.to_csv("data/rainfall/hourly_rainfall.csv", index=False)
-
-print("[SUCCESS] Historical rainfall downloaded")
-print(df.head())
+print(f"[SUCCESS] {len(df)} days of rainfall data saved")
+print(df.tail())

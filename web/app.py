@@ -23,6 +23,9 @@ def all_pipes():
         drains = gpd.read_file("data/hyderabad_drains.geojson")
         risk   = pd.read_csv("data/flood_risk.csv")
 
+        # Remove zero flow pipes before merging
+        risk = risk[risk["flow_m3s"] > 0].copy()
+
         drains = drains.reset_index().rename(columns={"index": "edge_id"})
         risk["edge_id"] = risk.index
         merged = drains.merge(risk, on="edge_id", how="left")
@@ -52,13 +55,20 @@ def all_pipes():
 def risk_points():
     try:
         risk  = pd.read_csv("data/flood_risk.csv")
-        nodes = pd.read_csv("data/drain_nodes_with_elevation.csv")
 
+        # Remove zero flow pipes
+        risk = risk[risk["flow_m3s"] > 0].copy()
+
+        nodes = pd.read_csv("data/drain_nodes_with_elevation.csv")
         node_coords = nodes.set_index("node_id")[["x","y","elevation_m"]]
+
+        # Merge coordinates — keep all risk columns
         risk = risk.merge(node_coords, left_on="from", right_index=True, how="left")
 
+        # Drop rows with no coordinates
+        risk = risk.dropna(subset=["x", "y"])
+
         import geopandas as gpd
-        from shapely.geometry import Point
         gdf = gpd.GeoDataFrame(
             risk,
             geometry=gpd.points_from_xy(risk["x"], risk["y"]),
@@ -68,8 +78,19 @@ def risk_points():
         gdf["lat"] = gdf.geometry.y
         gdf["lon"] = gdf.geometry.x
 
-        top = gdf.sort_values("P_clog", ascending=False).head(20)
-        result = top[["from","to","flow_m3s","P_clog","flooding","lat","lon"]].to_dict(orient="records")
+        # Flooded pipes first, then by overflow amount
+        top = gdf.sort_values(
+            ["flooding", "overflow_m3s"],
+            ascending=[False, False]
+        ).head(20)
+
+        result = top[[
+            "from", "to",
+            "flow_m3s", "overflow_m3s",
+            "P_clog", "flooding",
+            "lat", "lon"
+        ]].to_dict(orient="records")
+
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)})
