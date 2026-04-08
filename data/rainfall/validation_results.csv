@@ -1,0 +1,2 @@
+ks_statistic,ks_pvalue,ks_pass,ad_statistic,ad_pass,chi2_statistic,chi2_pvalue,chi2_pass,mk_z,mk_pvalue,mk_trend,return_level_100yr,ci_lower_95,ci_upper_95
+0.1175,0.6759,True,0.7202,True,0.4716,0.4922,True,-0.7385,0.4602,False,68.33,44.19,124.58
