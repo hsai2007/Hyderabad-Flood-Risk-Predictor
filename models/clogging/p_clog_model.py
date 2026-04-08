@@ -2,55 +2,55 @@ import pandas as pd
 import numpy as np
 
 pipes = pd.read_csv("data/drain_design.csv")
+print(f"[INFO] Total pipes loaded: {len(pipes)}")
 
-# Remove zero flow pipes
-pipes = pipes[pipes["flow_m3s"] > 0].copy()
-print(f"[INFO] Pipes with actual flow: {len(pipes)}")
-# Remove pipes with river-scale flows — these are Musi River
-# and major canals, not urban drains
-pipes = pipes[pipes["flow_m3s"] < 15.0].copy()
-print(f"[INFO] Pipes after removing river-scale flows: {len(pipes)}")
+# ================================
+# SEPARATE river-scale pipes from urban drains
+# instead of dropping them entirely
+# ================================
+
+pipes["is_river"] = (pipes["flow_m3s"] > 40.0) | (pipes["flow_m3s"] == 0)
+
+urban  = pipes[~pipes["is_river"]].copy()
+rivers = pipes[pipes["is_river"]].copy()
+
+print(f"[INFO] Urban drain pipes (to analyse): {len(urban)}")
+print(f"[INFO] River/zero pipes (excluded):    {len(rivers)}")
 
 # ================================
 # REALISTIC PIPE SIZING
-# design_pipes.py gave every pipe a perfect diameter — so nothing floods.
-# Real Hyderabad drains were built years ago with standard fixed sizes.
-# Diameters assigned per CPHEEO Manual on Storm Water Drainage
-# design standards for Class I cities.
+# Diameters per CPHEEO Manual on Storm Water Drainage
+# for Class I cities — assigned by flow magnitude
 # ================================
 
 def realistic_diameter(flow):
-    """
-    Pipe diameters scaled to Hyderabad network flow magnitudes.
-    Per CPHEEO Manual on Storm Water Drainage for Class I cities.
-    Large trunk drains in Hyderabad carry 10-80 m3/s during peak monsoon.
-    """
-    if flow < 0.05:    return 0.45
-    elif flow < 0.3:   return 0.60
-    elif flow < 1.0:   return 0.90
-    elif flow < 3.0:   return 1.20
-    elif flow < 8.0:   return 1.80
-    elif flow < 15.0:  return 2.40
-    else:              return 3.00
+    if flow < 0.05:   return 0.45
+    elif flow < 0.3:  return 0.60
+    elif flow < 1.0:  return 0.90
+    elif flow < 3.0:  return 1.20
+    elif flow < 8.0:  return 1.80
+    elif flow < 15.0: return 2.40
+    else:             return 3.00
 
 def manning_capacity(D, S, n=0.013):
+    """Manning's equation at 75% full — CPHEEO standard."""
     A = np.pi * (D / 2) ** 2
     R = D / 4
     Q_full = (1 / n) * A * (R ** (2/3)) * (max(S, 0.005) ** 0.5)
     return Q_full * 0.75
 
-pipes["required_diameter_m"] = pipes["flow_m3s"].apply(realistic_diameter)
-pipes["design_capacity_m3s"] = pipes.apply(
+urban["required_diameter_m"] = urban["flow_m3s"].apply(realistic_diameter)
+urban["design_capacity_m3s"] = urban.apply(
     lambda r: manning_capacity(r["required_diameter_m"], r["slope"]),
     axis=1
 )
 
 print("[INFO] Pipe diameter distribution:")
-print(pipes["required_diameter_m"].value_counts().sort_index())
+print(urban["required_diameter_m"].value_counts().sort_index())
 
 # ================================
 # CLOGGING MODEL
-# Based on CPHEEO Manual — self cleansing velocity = 0.6 m/s
+# CPHEEO Manual — self-cleansing velocity = 0.6 m/s
 # ================================
 
 def flow_velocity(Q, D):
@@ -60,9 +60,9 @@ def flow_velocity(Q, D):
     return Q / A
 
 def clogging_capacity_factor(D, velocity):
-    if D < 0.30:
+    if D < 0.45:
         max_reduction = 0.60
-    elif D < 0.60:
+    elif D < 0.90:
         max_reduction = 0.45
     else:
         max_reduction = 0.20
@@ -73,33 +73,49 @@ def clogging_capacity_factor(D, velocity):
     else:
         vel_factor = 1.0 - (velocity / V_SELF_CLEANSE)
 
-    total_reduction = max_reduction * vel_factor
-    return max(1.0 - total_reduction, 0.0)
+    return max(1.0 - (max_reduction * vel_factor), 0.0)
 
-pipes["velocity_m_s"] = pipes.apply(
+urban["velocity_m_s"] = urban.apply(
     lambda r: flow_velocity(r["flow_m3s"], r["required_diameter_m"]),
     axis=1
 )
 
-pipes["capacity_factor"] = pipes.apply(
+urban["capacity_factor"] = urban.apply(
     lambda r: clogging_capacity_factor(r["required_diameter_m"], r["velocity_m_s"]),
     axis=1
 )
 
-pipes["effective_capacity_m3s"] = pipes["design_capacity_m3s"] * pipes["capacity_factor"]
-pipes["P_clog"] = 1.0 - pipes["capacity_factor"]
-pipes["flooding"] = pipes["flow_m3s"] > pipes["effective_capacity_m3s"]
-pipes["overflow_m3s"] = (pipes["flow_m3s"] - pipes["effective_capacity_m3s"]).clip(lower=0)
+urban["effective_capacity_m3s"] = urban["design_capacity_m3s"] * urban["capacity_factor"]
+urban["P_clog"]       = 1.0 - urban["capacity_factor"]
+urban["flooding"]     = urban["flow_m3s"] > urban["effective_capacity_m3s"]
+urban["overflow_m3s"] = (urban["flow_m3s"] - urban["effective_capacity_m3s"]).clip(lower=0)
 
-pipes.to_csv("data/flood_risk.csv", index=False)
+# ================================
+# Give river/zero pipes neutral values
+# ================================
+rivers["required_diameter_m"]    = 0.0
+rivers["design_capacity_m3s"]    = 0.0
+rivers["velocity_m_s"]           = 0.0
+rivers["capacity_factor"]        = 0.0
+rivers["effective_capacity_m3s"] = 0.0
+rivers["P_clog"]                 = 0.0
+rivers["flooding"]               = False
+rivers["overflow_m3s"]           = 0.0
 
-flooded_count = pipes["flooding"].sum()
+# ================================
+# Recombine and save ALL pipes
+# ================================
+all_pipes = pd.concat([urban, rivers], ignore_index=True)
+all_pipes.to_csv("data/flood_risk.csv", index=False)
+
+flooded_count = urban["flooding"].sum()
 print(f"\n[SUCCESS] Flood risk computed")
-print(f"  Total pipes:   {len(pipes)}")
-print(f"  Flooded pipes: {flooded_count} ({100 * flooded_count / len(pipes):.1f}%)")
-print(f"  Avg P_clog:    {pipes['P_clog'].mean():.1%}")
+print(f"  Urban pipes analysed: {len(urban)}")
+print(f"  Flooded pipes:        {flooded_count} ({100 * flooded_count / len(urban):.1f}%)")
+print(f"  River/zero pipes:     {len(rivers)}")
+print(f"  Total saved:          {len(all_pipes)}")
 print()
-print(pipes[[
+print(urban[[
     "from", "to", "flow_m3s",
     "required_diameter_m", "velocity_m_s",
     "P_clog", "effective_capacity_m3s", "flooding"

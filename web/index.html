@@ -57,12 +57,15 @@
   <div class="legend-item"><div class="legend-dot" style="background:orange"></div> High clog risk (&gt;50%)</div>
   <div class="legend-item"><div class="legend-dot" style="background:#e6c800"></div> Medium risk (20–50%)</div>
   <div class="legend-item"><div class="legend-dot" style="background:green"></div> Low risk (&lt;20%)</div>
-  <div class="legend-item"><div class="legend-dot" style="background:blue"></div> No risk data</div>
+  <div class="legend-item"><div class="legend-dot" style="background:purple"></div> Major waterway</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#aaaaaa"></div> Outside study area</div>
 
   <div id="stats">
     <p id="stat-total">Total pipes: –</p>
     <p id="stat-flooded">Flooded: –</p>
     <p id="stat-high">High risk: –</p>
+    <p id="stat-river">Major waterways: –</p>
+    <p id="stat-nodata">Outside study area: –</p>
   </div>
 
   <div class="chart-wrap">
@@ -107,13 +110,18 @@ fetch("http://127.0.0.1:5000/all_pipes")
     document.getElementById("loading").style.display = "none";
 
     var total = 0, flooded = 0, high = 0;
-    var counts = { red: 0, orange: 0, yellow: 0, green: 0, blue: 0 };
+    var counts = { red:0, orange:0, yellow:0, green:0, purple:0, gray:0 };
 
     L.geoJSON(data, {
       style: function(feature) {
-        var color = feature.properties.risk_color || "blue";
-        var weight = (color === "red") ? 5 : 2.5;
-        return { color: color, weight: weight, opacity: 0.85 };
+        var color = feature.properties.risk_color || "gray";
+        var weight  = color === "red"    ? 5
+                    : color === "purple" ? 2
+                    : 2.5;
+        var opacity = color === "purple" ? 0.5
+                    : color === "gray"   ? 0.3
+                    : 0.85;
+        return { color: color, weight: weight, opacity: opacity };
       },
       onEachFeature: function(feature, layer) {
         var p = feature.properties || {};
@@ -121,32 +129,55 @@ fetch("http://127.0.0.1:5000/all_pipes")
         if (p.flooding === true) flooded++;
         if ((p.P_clog || 0) > 0.5) high++;
 
-        var color = feature.properties.risk_color || "blue";
+        var color = p.risk_color || "gray";
         counts[color] = (counts[color] || 0) + 1;
 
-        layer.bindPopup(
-          "<b>Drain Pipe</b><br>" +
-          "Flow: " + safeNum(p.flow_m3s, 3) + " m³/s<br>" +
-          "Overflow: " + safeNum(p.overflow_m3s, 3) + " m³/s<br>" +
-          "Clog risk: " + safeNum((p.P_clog || 0) * 100, 1) + "%<br>" +
-          "Flooded: " + (p.flooding ? "<b style='color:red'>YES</b>" : "No")
-        );
+        var popupContent;
+        if (color === "purple") {
+          popupContent =
+            "<b>Major Waterway</b><br>" +
+            "Flow: " + safeNum(p.flow_m3s, 3) + " m³/s<br>" +
+            "<i style='color:purple'>Musi River / major canal<br>excluded from drain analysis</i>";
+        } else if (!p.flow_m3s || p.flow_m3s === 0 || color === "gray") {
+          popupContent =
+            "<b>Drain Pipe</b><br>" +
+            "<i style='color:gray'>Outside study area —<br>no catchment data available</i>";
+        } else {
+          popupContent =
+            "<b>Drain Pipe</b><br>" +
+            "Flow: "     + safeNum(p.flow_m3s,     3) + " m³/s<br>" +
+            "Overflow: " + safeNum(p.overflow_m3s, 3) + " m³/s<br>" +
+            "Clog risk: "+ safeNum((p.P_clog||0)*100, 1) + "%<br>" +
+            "Flooded: "  + (p.flooding
+              ? "<b style='color:red'>YES</b>"
+              : "<span style='color:green'>No</span>");
+        }
+        layer.bindPopup(popupContent);
       }
     }).addTo(map);
 
-    document.getElementById("stat-total").textContent   = "Total pipes: " + total;
-    document.getElementById("stat-flooded").textContent = "Flooded: " + flooded;
-    document.getElementById("stat-high").textContent    = "High risk: " + high;
+    document.getElementById("stat-total").textContent   = "Total pipes: "          + total;
+    document.getElementById("stat-flooded").textContent = "Flooded: "              + flooded;
+    document.getElementById("stat-high").textContent    = "High clog risk: "       + high;
+    document.getElementById("stat-river").textContent   = "Major waterways: "      + (counts.purple || 0);
+    document.getElementById("stat-nodata").textContent  = "Outside study area: "   + (counts.gray   || 0);
 
     try {
       var ctx = document.getElementById('riskChart').getContext('2d');
       new Chart(ctx, {
         type: 'doughnut',
         data: {
-          labels: ['Flooded', 'High', 'Medium', 'Low', 'No data'],
+          labels: ['Flooded','High','Medium','Low','Waterway','No data'],
           datasets: [{
-            data: [counts.red||0, counts.orange||0, counts.yellow||0, counts.green||0, counts.blue||0],
-            backgroundColor: ['red', 'orange', '#e6c800', 'green', 'blue']
+            data: [
+              counts.red    || 0,
+              counts.orange || 0,
+              counts.yellow || 0,
+              counts.green  || 0,
+              counts.purple || 0,
+              counts.gray   || 0
+            ],
+            backgroundColor: ['red','orange','#e6c800','green','purple','#aaaaaa']
           }]
         },
         options: {
@@ -169,23 +200,24 @@ fetch("http://127.0.0.1:5000/risk_points")
       if (!p.lat || !p.lon) return;
       L.circleMarker([p.lat, p.lon], {
         radius: 8,
-        color: p.flooding ? "red" : "orange",
-        fillColor: p.flooding ? "red" : "orange",
+        color:       p.flooding ? "red"  : "orange",
+        fillColor:   p.flooding ? "red"  : "orange",
         fillOpacity: 0.8,
         weight: 2
       }).bindPopup(
         "<b>High Risk Point</b><br>" +
-        "Flow: " + safeNum(p.flow_m3s, 3) + " m³/s<br>" +
+        "Flow: "     + safeNum(p.flow_m3s,     3) + " m³/s<br>" +
         "Overflow: " + safeNum(p.overflow_m3s, 3) + " m³/s<br>" +
-        "Clog risk: " + safeNum((p.P_clog || 0) * 100, 1) + "%<br>" +
-        "Flooded: " + (p.flooding ? "<b style='color:red'>YES</b>" : "No")
+        "Clog risk: "+ safeNum((p.P_clog||0)*100, 1) + "%<br>" +
+        "Flooded: "  + (p.flooding
+          ? "<b style='color:red'>YES</b>"
+          : "<span style='color:green'>No</span>")
       ).addTo(map);
     });
 
-    // Top 10 for bar chart — show overflow amounts
     var top = points.slice(0, 10);
-    var labels = top.map(p => (p.from || '-') + '→' + (p.to || '-'));
-    var dataVals = top.map(p => Math.round((p.overflow_m3s || 0) * 1000) / 1000);
+    var labels   = top.map(p => (p.from||'-') + '→' + (p.to||'-'));
+    var dataVals = top.map(p => Math.round((p.overflow_m3s||0) * 1000) / 1000);
 
     try {
       var clogCtx = document.getElementById('clogChart').getContext('2d');
@@ -196,7 +228,9 @@ fetch("http://127.0.0.1:5000/risk_points")
           datasets: [{
             label: 'Overflow (m³/s)',
             data: dataVals,
-            backgroundColor: top.map(p => p.flooding ? 'rgba(220,50,50,0.8)' : 'rgba(255,160,50,0.8)')
+            backgroundColor: top.map(p =>
+              p.flooding ? 'rgba(220,50,50,0.8)' : 'rgba(255,160,50,0.8)'
+            )
           }]
         },
         options: {
@@ -207,7 +241,6 @@ fetch("http://127.0.0.1:5000/risk_points")
       });
     } catch(e) { console.warn('Chart error', e); }
 
-    // Fill table — flooded pipes first, show flow and overflow
     var tbody = document.querySelector('#topTable tbody');
     if (tbody) {
       tbody.innerHTML = '';
@@ -217,9 +250,9 @@ fetch("http://127.0.0.1:5000/risk_points")
           ? "<td style='color:red; font-weight:600'>YES</td>"
           : "<td style='color:green'>No</td>";
         tr.innerHTML =
-          '<td>' + (p.from || '') + '</td>' +
-          '<td>' + (p.to || '') + '</td>' +
-          '<td>' + safeNum(p.flow_m3s, 3) + '</td>' +
+          '<td>' + (p.from||'') + '</td>' +
+          '<td>' + (p.to  ||'') + '</td>' +
+          '<td>' + safeNum(p.flow_m3s,     3) + '</td>' +
           '<td>' + safeNum(p.overflow_m3s, 3) + '</td>' +
           floodCell;
         tbody.appendChild(tr);

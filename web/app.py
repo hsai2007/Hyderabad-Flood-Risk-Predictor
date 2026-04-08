@@ -1,7 +1,6 @@
 from flask import Flask, jsonify, send_from_directory
 import geopandas as gpd
 import pandas as pd
-import json
 
 app = Flask(__name__, static_folder=".")
 
@@ -20,55 +19,25 @@ def floods():
 @app.route("/all_pipes")
 def all_pipes():
     try:
-        drains = gpd.read_file("data/hyderabad_drains.geojson")
-        risk   = pd.read_csv("data/flood_risk.csv")
-
-        # Remove zero flow pipes before merging
-        risk = risk[risk["flow_m3s"] > 0].copy()
-
-        drains = drains.reset_index().rename(columns={"index": "edge_id"})
-        risk["edge_id"] = risk.index
-        merged = drains.merge(risk, on="edge_id", how="left")
-
-        def risk_color(row):
-            if row.get("flooding") == True:
-                return "red"
-            p = row.get("P_clog", 0)
-            if pd.isna(p):
-                return "blue"
-            if p > 0.5:
-                return "orange"
-            if p > 0.2:
-                return "yellow"
-            return "green"
-
-        merged["risk_color"] = merged.apply(risk_color, axis=1)
-        merged["P_clog"]     = merged["P_clog"].fillna(0).round(3)
-        merged["flooding"]   = merged["flooding"].fillna(False)
-        merged["flow_m3s"]   = merged["flow_m3s"].fillna(0).round(3)
-
-        return merged.to_json()
+        gdf = gpd.read_file("data/drain_risk.geojson")
+        return gdf.to_json()
     except Exception as e:
         return jsonify({"error": str(e)})
 
 @app.route("/risk_points")
 def risk_points():
     try:
-        risk  = pd.read_csv("data/flood_risk.csv")
+        risk = pd.read_csv("data/flood_risk.csv")
 
-        # Remove zero flow pipes
-        risk = risk[risk["flow_m3s"] > 0].copy()
+        # Only urban drains — exclude rivers and zero flow
+        risk = risk[(risk["flow_m3s"] > 0) & (risk["is_river"] == False)].copy()
 
         nodes = pd.read_csv("data/drain_nodes_with_elevation.csv")
-        node_coords = nodes.set_index("node_id")[["x","y","elevation_m"]]
+        node_coords = nodes.set_index("node_id")[["x", "y", "elevation_m"]]
 
-        # Merge coordinates — keep all risk columns
         risk = risk.merge(node_coords, left_on="from", right_index=True, how="left")
-
-        # Drop rows with no coordinates
         risk = risk.dropna(subset=["x", "y"])
 
-        import geopandas as gpd
         gdf = gpd.GeoDataFrame(
             risk,
             geometry=gpd.points_from_xy(risk["x"], risk["y"]),
@@ -78,7 +47,6 @@ def risk_points():
         gdf["lat"] = gdf.geometry.y
         gdf["lon"] = gdf.geometry.x
 
-        # Flooded pipes first, then by overflow amount
         top = gdf.sort_values(
             ["flooding", "overflow_m3s"],
             ascending=[False, False]
